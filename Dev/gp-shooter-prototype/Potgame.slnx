@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Potgame.vcxproj" Id="15475f2c-eff4-49e3-b52c-6dd568a54655" />
+</Solution>
