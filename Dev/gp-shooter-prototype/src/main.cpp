@@ -115,13 +115,6 @@ struct GameTextures
     TextureAsset fireRateItem;
 };
 
-struct Loot
-{
-    Vec2 pos;
-    float radius;
-    bool alive;
-};
-
 struct Chest
 {
     Vec2 pos;
@@ -498,12 +491,7 @@ static bool LoadGameTextures(SDL_Renderer* renderer, GameTextures& textures)
 {
     bool ok = true;
 
-    ok &= LoadTextureFromFile(
-        renderer,
-        "boo\xEB\xA9\x94\xEC\x9D\xB8\xEC\xBA\x90\xEB\xA6\xAD\xED\x84\xB0.png",
-        textures.playerBoo,
-        false
-    );
+    ok &= LoadTextureFromFile(renderer, "BOO.png", textures.playerBoo, false);
     ok &= LoadTextureFromFile(renderer, "\xEB\x8A\x91\xEB\x8C\x80.png", textures.wolf, true);
     ok &= LoadTextureFromFile(renderer, "\xEB\x8B\xA4\xEA\xB0\x80\xEC\x98\xA4\xEB\x8A\x94\xEC\xA0\x81.png", textures.charger, true);
     ok &= LoadTextureFromFile(renderer, "\xEC\x95\xBC\xEA\xB5\xAC\xEB\xB0\xA9\xEB\xA7\x9D\xEC\x9D\xB4\xEC\xA0\x81.png", textures.batEnemy, true);
@@ -956,13 +944,51 @@ static void SpawnEnemies(std::vector<Enemy>& enemies)
 {
     enemies.clear();
 
-    enemies.push_back(MakeEnemy(Vec2(980.0f, 520.0f), EnemyType::Wolf, 6, 20.0f));
-    enemies.push_back(MakeEnemy(Vec2(1680.0f, 680.0f), EnemyType::Charger, 3, 18.0f));
-    enemies.push_back(MakeEnemy(Vec2(2280.0f, 1180.0f), EnemyType::Bat, 5, 19.0f));
-    enemies.push_back(MakeEnemy(Vec2(2860.0f, 760.0f), EnemyType::Gun, 4, 18.0f));
-    enemies.push_back(MakeEnemy(Vec2(1320.0f, 1680.0f), EnemyType::Gun, 4, 18.0f));
-    enemies.push_back(MakeEnemy(Vec2(760.0f, 1420.0f), EnemyType::Charger, 3, 18.0f));
-    enemies.push_back(MakeEnemy(Vec2(2480.0f, 1880.0f), EnemyType::Wolf, 6, 20.0f));
+    struct EnemySpawn
+    {
+        Vec2 pos;
+        EnemyType type;
+        int hp;
+        float radius;
+    };
+
+    const EnemySpawn spawns[] = {
+        { Vec2(900.0f, 480.0f), EnemyType::Wolf, 6, 20.0f },
+        { Vec2(1180.0f, 620.0f), EnemyType::Charger, 3, 18.0f },
+        { Vec2(1480.0f, 520.0f), EnemyType::Gun, 4, 18.0f },
+        { Vec2(1760.0f, 700.0f), EnemyType::Bat, 5, 19.0f },
+        { Vec2(2060.0f, 560.0f), EnemyType::Wolf, 6, 20.0f },
+        { Vec2(2360.0f, 680.0f), EnemyType::Charger, 3, 18.0f },
+        { Vec2(2680.0f, 520.0f), EnemyType::Gun, 4, 18.0f },
+        { Vec2(2960.0f, 760.0f), EnemyType::Bat, 5, 19.0f },
+        { Vec2(820.0f, 980.0f), EnemyType::Charger, 3, 18.0f },
+        { Vec2(1120.0f, 1120.0f), EnemyType::Gun, 4, 18.0f },
+        { Vec2(1420.0f, 980.0f), EnemyType::Wolf, 6, 20.0f },
+        { Vec2(1720.0f, 1180.0f), EnemyType::Bat, 5, 19.0f },
+        { Vec2(2020.0f, 1040.0f), EnemyType::Charger, 3, 18.0f },
+        { Vec2(2320.0f, 1180.0f), EnemyType::Gun, 4, 18.0f },
+        { Vec2(2620.0f, 980.0f), EnemyType::Wolf, 6, 20.0f },
+        { Vec2(2920.0f, 1120.0f), EnemyType::Bat, 5, 19.0f },
+        { Vec2(760.0f, 1480.0f), EnemyType::Gun, 4, 18.0f },
+        { Vec2(1080.0f, 1620.0f), EnemyType::Charger, 3, 18.0f },
+        { Vec2(1380.0f, 1480.0f), EnemyType::Wolf, 6, 20.0f },
+        { Vec2(1680.0f, 1760.0f), EnemyType::Bat, 5, 19.0f },
+        { Vec2(1980.0f, 1580.0f), EnemyType::Gun, 4, 18.0f },
+        { Vec2(2280.0f, 1720.0f), EnemyType::Charger, 3, 18.0f },
+        { Vec2(2580.0f, 1480.0f), EnemyType::Wolf, 6, 20.0f },
+        { Vec2(2880.0f, 1660.0f), EnemyType::Gun, 4, 18.0f },
+        { Vec2(3180.0f, 1380.0f), EnemyType::Bat, 5, 19.0f },
+        { Vec2(620.0f, 760.0f), EnemyType::Charger, 3, 18.0f },
+        { Vec2(3180.0f, 820.0f), EnemyType::Wolf, 6, 20.0f },
+        { Vec2(2480.0f, 1880.0f), EnemyType::Gun, 4, 18.0f },
+        { Vec2(1560.0f, 1320.0f), EnemyType::Bat, 5, 19.0f },
+        { Vec2(920.0f, 1880.0f), EnemyType::Wolf, 6, 20.0f }
+    };
+
+    for (const EnemySpawn& spawn : spawns)
+    {
+        enemies.push_back(MakeEnemy(spawn.pos, spawn.type, spawn.hp, spawn.radius));
+    }
 }
 
 static ItemType RandomChestItem()
@@ -1148,7 +1174,7 @@ static void DrawPlayer(
                 weaponPos,
                 camera,
                 GetWeaponDisplaySize(player.weapon),
-                aimAngle
+                aimAngle + PI
             );
         }
     }
@@ -1251,23 +1277,9 @@ static void DrawHealthBar(SDL_Renderer* renderer, const Player& player)
     SDL_RenderFillRect(renderer, &hp);
 }
 
-static void DrawStatusUI(SDL_Renderer* renderer, const Player& player, int lootCount)
+static void DrawStatusUI(SDL_Renderer* renderer, const Player& player)
 {
-    SDL_Rect lootBack{ 24, 56, 120, 22 };
-    SDL_SetRenderDrawColor(renderer, 60, 60, 70, 255);
-    SDL_RenderFillRect(renderer, &lootBack);
-
-    SDL_SetRenderDrawColor(renderer, 255, 215, 80, 255);
-    SDL_Rect lootFill{ 24, 56, lootCount * 24, 22 };
-
-    if (lootFill.w > 120)
-    {
-        lootFill.w = 120;
-    }
-
-    SDL_RenderFillRect(renderer, &lootFill);
-
-    SDL_Rect weaponBox{ 24, 88, 120, 22 };
+    SDL_Rect weaponBox{ 24, 56, 120, 22 };
 
     if (player.weapon == WeaponType::Pistol)
     {
@@ -1284,7 +1296,7 @@ static void DrawStatusUI(SDL_Renderer* renderer, const Player& player, int lootC
 
     SDL_RenderFillRect(renderer, &weaponBox);
 
-    SDL_Rect medkitBox{ 24, 120, player.medkitCount * 28, 18 };
+    SDL_Rect medkitBox{ 24, 88, player.medkitCount * 28, 18 };
 
     if (medkitBox.w > 112)
     {
@@ -1298,7 +1310,7 @@ static void DrawStatusUI(SDL_Renderer* renderer, const Player& player, int lootC
     {
         SDL_Rect fireBox{
             24,
-            148,
+            116,
             static_cast<int>(player.fireRateBuffTimer * 14.0f),
             16
         };
@@ -1316,7 +1328,7 @@ static void DrawStatusUI(SDL_Renderer* renderer, const Player& player, int lootC
     {
         SDL_Rect bounceBox{
             24,
-            172,
+            140,
             static_cast<int>(player.ricochetBuffTimer * 14.0f),
             16
         };
@@ -1662,34 +1674,38 @@ static void DrawMainMenu(
     DrawCachedText(renderer, *hint, WINDOW_WIDTH / 2, WINDOW_HEIGHT - 48, true);
 }
 
+static const wchar_t kWeaponNamePistol[] = { 0xAD8C, 0xCD09, 0 };
+static const wchar_t kWeaponNameMachineGun[] = { 0xAE30, 0xAD00, 0xB2E8, 0xCD09, 0 };
+static const wchar_t kWeaponNameShotgun[] = { 0xC0F7, 0xAC74, 0 };
+
 static const wchar_t* GetChestItemName(ItemType item)
 {
     if (item == ItemType::MachineGun)
     {
-        return L"\uae30\uad00\ub2e8\ucd09";
+        return kWeaponNameMachineGun;
     }
 
     if (item == ItemType::Shotgun)
     {
-        return L"\uc0f7\uac74";
+        return kWeaponNameShotgun;
     }
 
-    return L"\uad8c\ucd09";
+    return kWeaponNamePistol;
 }
 
 static const wchar_t* GetWeaponName(WeaponType weapon)
 {
     if (weapon == WeaponType::MachineGun)
     {
-        return L"\uae30\uad00\ub2e8\ucd09";
+        return kWeaponNameMachineGun;
     }
 
     if (weapon == WeaponType::Shotgun)
     {
-        return L"\uc0f7\uac74";
+        return kWeaponNameShotgun;
     }
 
-    return L"\uad8c\ucd09";
+    return kWeaponNamePistol;
 }
 
 static void DrawChestSlotPanel(
@@ -1988,17 +2004,13 @@ static void DrawControlsScreen(SDL_Renderer* renderer, std::vector<TextEntry>& t
 static void ResetGameplay(
     Player& player,
     std::vector<Bullet>& bullets,
-    std::vector<Loot>& loots,
     std::vector<Enemy>& enemies,
     std::vector<Chest>& chests,
     std::vector<BuffPickup>& buffs,
-    ChestUiState& chestUi,
-    int& lootCount)
+    ChestUiState& chestUi)
 {
     player.Reset();
     bullets.clear();
-    loots.clear();
-    lootCount = 0;
     chestUi.open = false;
     chestUi.chestIndex = -1;
     chestUi.confirmTake = false;
@@ -2169,7 +2181,6 @@ int main(int argc, char* argv[])
     std::vector<RectF> obstacles;
     std::vector<Enemy> enemies;
     std::vector<Bullet> bullets;
-    std::vector<Loot> loots;
     std::vector<Chest> chests;
     std::vector<BuffPickup> buffs;
 
@@ -2182,8 +2193,6 @@ int main(int argc, char* argv[])
 
     Uint64 previousCounter = SDL_GetPerformanceCounter();
     double accumulator = 0.0;
-
-    int lootCount = 0;
 
     bool interactPressed = false;
     bool confirmSelectPressed = false;
@@ -2236,7 +2245,7 @@ int main(int argc, char* argv[])
 
                 if (HandleMenuInput(menu, event, mouseX, mouseY))
                 {
-                    ResetGameplay(player, bullets, loots, enemies, chests, buffs, chestUi, lootCount);
+                    ResetGameplay(player, bullets, enemies, chests, buffs, chestUi);
                 }
 
                 continue;
@@ -2267,7 +2276,7 @@ int main(int argc, char* argv[])
 
                 if (event.key.keysym.sym == SDLK_r)
                 {
-                    ResetGameplay(player, bullets, loots, enemies, chests, buffs, chestUi, lootCount);
+                    ResetGameplay(player, bullets, enemies, chests, buffs, chestUi);
                 }
 
                 if (event.key.keysym.sym == SDLK_e)
@@ -2583,8 +2592,6 @@ int main(int argc, char* argv[])
                             {
                                 player.Reset();
                                 bullets.clear();
-                                loots.clear();
-                                lootCount = 0;
                                 chestUi.open = false;
                                 chestUi.chestIndex = -1;
                                 chestUi.confirmTake = false;
@@ -2687,7 +2694,6 @@ int main(int argc, char* argv[])
                                 if (enemy.hp <= 0)
                                 {
                                     enemy.alive = false;
-                                    loots.push_back({ enemy.pos, 11.0f, true });
                                 }
 
                                 break;
@@ -2707,8 +2713,6 @@ int main(int argc, char* argv[])
                             {
                                 player.Reset();
                                 bullets.clear();
-                                loots.clear();
-                                lootCount = 0;
                                 chestUi.open = false;
                                 chestUi.chestIndex = -1;
                                 chestUi.confirmTake = false;
@@ -2718,22 +2722,6 @@ int main(int argc, char* argv[])
                                 break;
                             }
                         }
-                    }
-                }
-
-                for (Loot& loot : loots)
-                {
-                    if (!loot.alive)
-                    {
-                        continue;
-                    }
-
-                    if (CircleIntersectsCircle(
-                        Circle{ loot.pos, loot.radius },
-                        Circle{ player.pos, player.radius + 6.0f }))
-                    {
-                        loot.alive = false;
-                        lootCount += 1;
                     }
                 }
 
@@ -2748,16 +2736,6 @@ int main(int argc, char* argv[])
                     bullets.end()
                 );
 
-                loots.erase(
-                    std::remove_if(
-                        loots.begin(),
-                        loots.end(),
-                        [](const Loot& l)
-                        {
-                            return !l.alive;
-                        }),
-                    loots.end()
-                );
             }
 
             accumulator -= FIXED_DT;
@@ -2786,14 +2764,6 @@ int main(int argc, char* argv[])
             {
                 DrawBuffPickup(renderer, buff, camera, textures);
             }
-        }
-
-        SDL_SetRenderDrawColor(renderer, 255, 215, 80, 255);
-
-        for (const Loot& loot : loots)
-        {
-            Vec2 screen = WorldToScreen(loot.pos, camera);
-            DrawCircle(renderer, static_cast<int>(screen.x), static_cast<int>(screen.y), static_cast<int>(loot.radius));
         }
 
         for (const Enemy& enemy : enemies)
@@ -2828,7 +2798,7 @@ int main(int argc, char* argv[])
 
         DrawPlayer(renderer, player, camera, mouseWorld, textures);
         DrawHealthBar(renderer, player);
-        DrawStatusUI(renderer, player, lootCount);
+        DrawStatusUI(renderer, player);
         DrawChestUi(renderer, textCache, chestUi, chests, player, textures);
 
         SDL_RenderPresent(renderer);
