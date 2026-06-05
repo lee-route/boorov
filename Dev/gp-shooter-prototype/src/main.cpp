@@ -558,7 +558,8 @@ static void DrawTextureCentered(
     const TextureAsset& asset,
     const Vec2& worldPos,
     const Camera& camera,
-    float displaySize)
+    float displaySize,
+    SDL_RendererFlip flip = SDL_FLIP_NONE)
 {
     if (!asset.texture || asset.width <= 0 || asset.height <= 0)
     {
@@ -578,7 +579,9 @@ static void DrawTextureCentered(
         drawH
     };
 
-    SDL_RenderCopy(renderer, asset.texture, nullptr, &dst);
+    SDL_Point center{ drawW / 2, drawH / 2 };
+
+    SDL_RenderCopyEx(renderer, asset.texture, nullptr, &dst, 0.0, &center, flip);
 }
 
 static void DrawTextureRotated(
@@ -640,15 +643,33 @@ static float GetWeaponDisplaySize(WeaponType weapon)
 {
     if (weapon == WeaponType::MachineGun)
     {
-        return 76.0f;
+        return 38.0f;
     }
 
     if (weapon == WeaponType::Shotgun)
     {
-        return 88.0f;
+        return 42.0f;
     }
 
-    return 64.0f;
+    return 34.0f;
+}
+
+static Vec2 RotateVec2(const Vec2& v, float angleRadians)
+{
+    float c = std::cos(angleRadians);
+    float s = std::sin(angleRadians);
+    return Vec2(v.x * c - v.y * s, v.x * s + v.y * c);
+}
+
+static Vec2 GetWeaponGripLocalOffset(const TextureAsset& asset, float displaySize)
+{
+    int maxDim = asset.width > asset.height ? asset.width : asset.height;
+    float scale = displaySize / static_cast<float>(maxDim);
+    float drawW = asset.width * scale;
+    float drawH = asset.height * scale;
+
+    // Gun sprites face left; grip sits on the right side of the texture.
+    return Vec2(drawW * 0.28f, drawH * 0.04f);
 }
 
 static void DrawWorldFloor(SDL_Renderer* renderer, const Camera& camera)
@@ -953,20 +974,15 @@ static void SpawnEnemies(std::vector<Enemy>& enemies)
     };
 
     const EnemySpawn spawns[] = {
-        { Vec2(980.0f, 520.0f), EnemyType::Wolf, 12, 22.0f },
-        { Vec2(1480.0f, 560.0f), EnemyType::Gun, 10, 20.0f },
-        { Vec2(1980.0f, 680.0f), EnemyType::Bat, 14, 21.0f },
-        { Vec2(2480.0f, 520.0f), EnemyType::Charger, 8, 19.0f },
-        { Vec2(2880.0f, 760.0f), EnemyType::Wolf, 12, 22.0f },
-        { Vec2(1120.0f, 1080.0f), EnemyType::Gun, 10, 20.0f },
-        { Vec2(1620.0f, 1180.0f), EnemyType::Bat, 14, 21.0f },
-        { Vec2(2120.0f, 1020.0f), EnemyType::Charger, 8, 19.0f },
-        { Vec2(2620.0f, 1120.0f), EnemyType::Wolf, 12, 22.0f },
-        { Vec2(820.0f, 1520.0f), EnemyType::Gun, 10, 20.0f },
-        { Vec2(1380.0f, 1680.0f), EnemyType::Bat, 14, 21.0f },
-        { Vec2(1880.0f, 1580.0f), EnemyType::Charger, 8, 19.0f },
-        { Vec2(2480.0f, 1780.0f), EnemyType::Wolf, 12, 22.0f },
-        { Vec2(2980.0f, 1420.0f), EnemyType::Gun, 10, 20.0f }
+        { Vec2(1180.0f, 520.0f), EnemyType::Wolf, 5, 20.0f },
+        { Vec2(1680.0f, 620.0f), EnemyType::Wolf, 5, 20.0f },
+        { Vec2(2180.0f, 480.0f), EnemyType::Wolf, 5, 20.0f },
+        { Vec2(2680.0f, 700.0f), EnemyType::Wolf, 5, 20.0f },
+        { Vec2(1420.0f, 1280.0f), EnemyType::Wolf, 5, 20.0f },
+        { Vec2(2320.0f, 1180.0f), EnemyType::Wolf, 5, 20.0f },
+        { Vec2(1980.0f, 860.0f), EnemyType::Charger, 26, 20.0f },
+        { Vec2(2620.0f, 1420.0f), EnemyType::Bat, 32, 21.0f },
+        { Vec2(1280.0f, 1680.0f), EnemyType::Gun, 28, 20.0f }
     };
 
     for (const EnemySpawn& spawn : spawns)
@@ -1132,7 +1148,7 @@ static void DrawPlayer(
 {
     if (textures.playerBoo.texture)
     {
-        DrawTextureCentered(renderer, textures.playerBoo, player.pos, camera, 72.0f);
+        DrawTextureCentered(renderer, textures.playerBoo, player.pos, camera, 72.0f, SDL_FLIP_HORIZONTAL);
     }
     else
     {
@@ -1151,14 +1167,21 @@ static void DrawPlayer(
 
         if (weaponTexture && weaponTexture->texture)
         {
-            Vec2 weaponPos = player.pos + aimDir * 26.0f;
+            // BOO faces right; front-pocket hand anchor on the right torso.
+            const Vec2 handOffset{ 11.0f, 8.0f };
+            Vec2 handPos = player.pos + handOffset;
+            float weaponAngle = aimAngle + PI;
+            float displaySize = GetWeaponDisplaySize(player.weapon);
+            Vec2 gripLocal = GetWeaponGripLocalOffset(*weaponTexture, displaySize);
+            Vec2 weaponPos = handPos - RotateVec2(gripLocal, weaponAngle);
+
             DrawTextureRotated(
                 renderer,
                 *weaponTexture,
                 weaponPos,
                 camera,
-                GetWeaponDisplaySize(player.weapon),
-                aimAngle + PI
+                displaySize,
+                weaponAngle
             );
         }
     }
