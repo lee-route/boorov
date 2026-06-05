@@ -510,7 +510,7 @@ static bool LoadGameTextures(SDL_Renderer* renderer, GameTextures& textures)
     );
     ok &= LoadTextureFromFile(
         renderer,
-        "item\xEC\xB4\x9D\xEC\x95\x9E\xEC\x86\x8D\xEB\x8F\x84.png",
+        "item\xEC\xB4\x9D\xEC\x95\x8C\xEC\x86\x8D\xEB\x8F\x84.png",
         textures.fireRateItem,
         true
     );
@@ -953,36 +953,20 @@ static void SpawnEnemies(std::vector<Enemy>& enemies)
     };
 
     const EnemySpawn spawns[] = {
-        { Vec2(900.0f, 480.0f), EnemyType::Wolf, 6, 20.0f },
-        { Vec2(1180.0f, 620.0f), EnemyType::Charger, 3, 18.0f },
-        { Vec2(1480.0f, 520.0f), EnemyType::Gun, 4, 18.0f },
-        { Vec2(1760.0f, 700.0f), EnemyType::Bat, 5, 19.0f },
-        { Vec2(2060.0f, 560.0f), EnemyType::Wolf, 6, 20.0f },
-        { Vec2(2360.0f, 680.0f), EnemyType::Charger, 3, 18.0f },
-        { Vec2(2680.0f, 520.0f), EnemyType::Gun, 4, 18.0f },
-        { Vec2(2960.0f, 760.0f), EnemyType::Bat, 5, 19.0f },
-        { Vec2(820.0f, 980.0f), EnemyType::Charger, 3, 18.0f },
-        { Vec2(1120.0f, 1120.0f), EnemyType::Gun, 4, 18.0f },
-        { Vec2(1420.0f, 980.0f), EnemyType::Wolf, 6, 20.0f },
-        { Vec2(1720.0f, 1180.0f), EnemyType::Bat, 5, 19.0f },
-        { Vec2(2020.0f, 1040.0f), EnemyType::Charger, 3, 18.0f },
-        { Vec2(2320.0f, 1180.0f), EnemyType::Gun, 4, 18.0f },
-        { Vec2(2620.0f, 980.0f), EnemyType::Wolf, 6, 20.0f },
-        { Vec2(2920.0f, 1120.0f), EnemyType::Bat, 5, 19.0f },
-        { Vec2(760.0f, 1480.0f), EnemyType::Gun, 4, 18.0f },
-        { Vec2(1080.0f, 1620.0f), EnemyType::Charger, 3, 18.0f },
-        { Vec2(1380.0f, 1480.0f), EnemyType::Wolf, 6, 20.0f },
-        { Vec2(1680.0f, 1760.0f), EnemyType::Bat, 5, 19.0f },
-        { Vec2(1980.0f, 1580.0f), EnemyType::Gun, 4, 18.0f },
-        { Vec2(2280.0f, 1720.0f), EnemyType::Charger, 3, 18.0f },
-        { Vec2(2580.0f, 1480.0f), EnemyType::Wolf, 6, 20.0f },
-        { Vec2(2880.0f, 1660.0f), EnemyType::Gun, 4, 18.0f },
-        { Vec2(3180.0f, 1380.0f), EnemyType::Bat, 5, 19.0f },
-        { Vec2(620.0f, 760.0f), EnemyType::Charger, 3, 18.0f },
-        { Vec2(3180.0f, 820.0f), EnemyType::Wolf, 6, 20.0f },
-        { Vec2(2480.0f, 1880.0f), EnemyType::Gun, 4, 18.0f },
-        { Vec2(1560.0f, 1320.0f), EnemyType::Bat, 5, 19.0f },
-        { Vec2(920.0f, 1880.0f), EnemyType::Wolf, 6, 20.0f }
+        { Vec2(980.0f, 520.0f), EnemyType::Wolf, 12, 22.0f },
+        { Vec2(1480.0f, 560.0f), EnemyType::Gun, 10, 20.0f },
+        { Vec2(1980.0f, 680.0f), EnemyType::Bat, 14, 21.0f },
+        { Vec2(2480.0f, 520.0f), EnemyType::Charger, 8, 19.0f },
+        { Vec2(2880.0f, 760.0f), EnemyType::Wolf, 12, 22.0f },
+        { Vec2(1120.0f, 1080.0f), EnemyType::Gun, 10, 20.0f },
+        { Vec2(1620.0f, 1180.0f), EnemyType::Bat, 14, 21.0f },
+        { Vec2(2120.0f, 1020.0f), EnemyType::Charger, 8, 19.0f },
+        { Vec2(2620.0f, 1120.0f), EnemyType::Wolf, 12, 22.0f },
+        { Vec2(820.0f, 1520.0f), EnemyType::Gun, 10, 20.0f },
+        { Vec2(1380.0f, 1680.0f), EnemyType::Bat, 14, 21.0f },
+        { Vec2(1880.0f, 1580.0f), EnemyType::Charger, 8, 19.0f },
+        { Vec2(2480.0f, 1780.0f), EnemyType::Wolf, 12, 22.0f },
+        { Vec2(2980.0f, 1420.0f), EnemyType::Gun, 10, 20.0f }
     };
 
     for (const EnemySpawn& spawn : spawns)
@@ -1248,12 +1232,21 @@ static void DrawBuffPickup(SDL_Renderer* renderer, const BuffPickup& buff, const
 
     if (sprite.texture)
     {
-        DrawTextureCentered(renderer, sprite, buff.pos, camera, 56.0f);
+        DrawTextureCentered(renderer, sprite, buff.pos, camera, 68.0f);
         return;
     }
 
     Vec2 screen = WorldToScreen(buff.pos, camera);
-    SDL_SetRenderDrawColor(renderer, 80, 220, 255, 255);
+
+    if (buff.type == BuffType::FireRate)
+    {
+        SDL_SetRenderDrawColor(renderer, 80, 220, 255, 255);
+    }
+    else
+    {
+        SDL_SetRenderDrawColor(renderer, 190, 100, 255, 255);
+    }
+
     DrawCircle(renderer, static_cast<int>(screen.x), static_cast<int>(screen.y), static_cast<int>(buff.radius));
 }
 
@@ -2536,10 +2529,10 @@ int main(int argc, char* argv[])
                                     false,
                                     430.0f,
                                     6.0f,
-                                    10,
+                                    15,
                                     0
                                 );
-                                enemy.shootTimer = 1.1f;
+                                enemy.shootTimer = 0.95f;
                             }
                             else
                             {
@@ -2574,15 +2567,15 @@ int main(int argc, char* argv[])
 
                         if (dist <= enemy.radius + player.radius + 8.0f && enemy.contactCooldown <= 0.0f)
                         {
-                            int damage = 8;
+                            int damage = 12;
 
                             if (enemy.type == EnemyType::Wolf)
                             {
-                                damage = 12;
+                                damage = 18;
                             }
                             else if (enemy.type == EnemyType::Bat)
                             {
-                                damage = 15;
+                                damage = 22;
                             }
 
                             player.hp -= damage;
