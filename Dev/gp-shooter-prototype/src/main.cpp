@@ -90,10 +90,6 @@ struct Enemy
     float shootTimer;
     float contactCooldown;
     bool alive;
-    bool alerted;
-    Vec2 facing;
-    float detectionRange;
-    float detectionCos;
     EnemyType type;
 };
 
@@ -134,31 +130,6 @@ struct BuffPickup
     float radius;
     bool alive;
     BuffType type;
-};
-
-
-enum class SurfaceType
-{
-    Normal,
-    Ice,
-    Mud
-};
-
-struct SurfaceZone
-{
-    RectF area;
-    SurfaceType type;
-    float friction;
-    float speedMultiplier;
-    float control;
-};
-
-struct BreakableWall
-{
-    RectF rect;
-    int hp;
-    int maxHp;
-    bool alive;
 };
 
 struct ContactInfo
@@ -299,6 +270,22 @@ static bool IsBakedBackgroundPixel(Uint8 r, Uint8 g, Uint8 b)
     return false;
 }
 
+static void FlipImageVertical(unsigned char* pixels, int width, int height)
+{
+    const int rowBytes = width * 4;
+    std::vector<unsigned char> row(static_cast<size_t>(rowBytes));
+
+    for (int y = 0; y < height / 2; ++y)
+    {
+        unsigned char* top = pixels + y * rowBytes;
+        unsigned char* bottom = pixels + (height - 1 - y) * rowBytes;
+
+        std::memcpy(row.data(), top, static_cast<size_t>(rowBytes));
+        std::memcpy(top, bottom, static_cast<size_t>(rowBytes));
+        std::memcpy(bottom, row.data(), static_cast<size_t>(rowBytes));
+    }
+}
+
 static void RemoveBakedBackground(unsigned char* pixels, int width, int height)
 {
     const int pixelCount = width * height;
@@ -415,7 +402,8 @@ static bool LoadTextureFromFile(
     SDL_Renderer* renderer,
     const char* filename,
     TextureAsset& out,
-    bool stripWhiteBackground = false)
+    bool stripWhiteBackground = false,
+    bool flipVertical = false)
 {
     std::string path = ResolveAssetPath(filename);
 
@@ -467,6 +455,11 @@ static bool LoadTextureFromFile(
     if (stripWhiteBackground && !ImageHasRealAlpha(pixels, width, height))
     {
         RemoveBakedBackground(pixels, width, height);
+    }
+
+    if (flipVertical)
+    {
+        FlipImageVertical(pixels, width, height);
     }
 
     out.texture = SDL_CreateTexture(
@@ -619,7 +612,8 @@ static void DrawTextureRotated(
     const Vec2& worldPos,
     const Camera& camera,
     float displaySize,
-    float angleRadians)
+    float angleRadians,
+    SDL_RendererFlip flip = SDL_FLIP_NONE)
 {
     if (!asset.texture || asset.width <= 0 || asset.height <= 0)
     {
@@ -649,7 +643,7 @@ static void DrawTextureRotated(
         &dst,
         angleDeg,
         &center,
-        SDL_FLIP_NONE
+        flip
     );
 }
 
@@ -690,17 +684,51 @@ static Vec2 RotateVec2(const Vec2& v, float angleRadians)
     return Vec2(v.x * c - v.y * s, v.x * s + v.y * c);
 }
 
-static bool PointInRect(const Vec2& p, const RectF& r);
-static void DrawWorldRect(SDL_Renderer* renderer, const RectF& r, const Camera& camera);
-static Vec2 GetWeaponGripLocalOffset(const TextureAsset& asset, float displaySize)
+static void DrawPlayerHeldWeapon(
+    SDL_Renderer* renderer,
+    const TextureAsset& asset,
+    WeaponType weapon,
+    const Vec2& handPos,
+    const Camera& camera,
+    float displaySize)
 {
+    if (!asset.texture || asset.width <= 0 || asset.height <= 0)
+    {
+        return;
+    }
+
     int maxDim = asset.width > asset.height ? asset.width : asset.height;
     float scale = displaySize / static_cast<float>(maxDim);
     float drawW = asset.width * scale;
     float drawH = asset.height * scale;
 
-    // Gun sprites face left; grip sits on the right side of the texture.
-    return Vec2(drawW * 0.28f, drawH * 0.04f);
+    SDL_RendererFlip flip = SDL_FLIP_HORIZONTAL;
+    float angleRadians = 0.0f;
+    Vec2 gripLocal(-drawW * 0.28f, drawH * 0.04f);
+
+    if (weapon == WeaponType::MachineGun)
+    {
+        // PNG barrel points upper-right; rotate clockwise to face the enemy on the right.
+        flip = SDL_FLIP_NONE;
+        angleRadians = PI / 4.0f;
+        gripLocal = Vec2(-drawW * 0.24f, drawH * 0.20f);
+    }
+    else if (weapon == WeaponType::Shotgun)
+    {
+        // Shotgun PNG already faces right; flipping would point the barrel backward.
+        flip = SDL_FLIP_NONE;
+    }
+
+    Vec2 weaponCenter = handPos - RotateVec2(gripLocal, angleRadians);
+
+    if (angleRadians == 0.0f)
+    {
+        DrawTextureCentered(renderer, asset, weaponCenter, camera, displaySize, flip);
+    }
+    else
+    {
+        DrawTextureRotated(renderer, asset, weaponCenter, camera, displaySize, angleRadians, flip);
+    }
 }
 
 static void DrawWorldFloor(SDL_Renderer* renderer, const Camera& camera)
@@ -739,74 +767,6 @@ static void DrawWorldFloor(SDL_Renderer* renderer, const Camera& camera)
             ScreenY(static_cast<float>(y), camera)
         );
     }
-}
-
-
-static void BuildSurfaceZones(std::vector<SurfaceZone>& surfaces)
-{
-    surfaces.clear();
-
-    // friction: how quickly velocity is damped when the player stops input.
-    // control: how quickly the player reaches target velocity while pressing input.
-    surfaces.push_back({ { 760.0f, 720.0f, 520.0f, 320.0f }, SurfaceType::Ice, 0.65f, 1.08f, 3.2f });
-    surfaces.push_back({ { 2260.0f, 1500.0f, 560.0f, 360.0f }, SurfaceType::Ice, 0.65f, 1.08f, 3.2f });
-    surfaces.push_back({ { 1340.0f, 1120.0f, 520.0f, 320.0f }, SurfaceType::Mud, 7.5f, 0.58f, 12.0f });
-    surfaces.push_back({ { 2920.0f, 540.0f, 360.0f, 520.0f }, SurfaceType::Mud, 7.5f, 0.58f, 12.0f });
-}
-
-static SurfaceZone GetSurfaceAt(const Vec2& pos, const std::vector<SurfaceZone>& surfaces)
-{
-    for (const SurfaceZone& surface : surfaces)
-    {
-        if (PointInRect(pos, surface.area))
-        {
-            return surface;
-        }
-    }
-
-    return { { 0.0f, 0.0f, WORLD_WIDTH, WORLD_HEIGHT }, SurfaceType::Normal, 5.2f, 1.0f, 10.0f };
-}
-
-static void DrawSurfaceZones(SDL_Renderer* renderer, const std::vector<SurfaceZone>& surfaces, const Camera& camera)
-{
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-
-    for (const SurfaceZone& surface : surfaces)
-    {
-        if (surface.type == SurfaceType::Ice)
-        {
-            SDL_SetRenderDrawColor(renderer, 90, 190, 240, 90);
-        }
-        else if (surface.type == SurfaceType::Mud)
-        {
-            SDL_SetRenderDrawColor(renderer, 120, 78, 42, 115);
-        }
-        else
-        {
-            continue;
-        }
-
-        DrawWorldRect(renderer, surface.area, camera);
-
-        if (surface.type == SurfaceType::Ice)
-        {
-            SDL_SetRenderDrawColor(renderer, 180, 235, 255, 120);
-        }
-        else
-        {
-            SDL_SetRenderDrawColor(renderer, 80, 48, 28, 150);
-        }
-
-        SDL_Rect outline{
-            ScreenX(surface.area.x, camera),
-            ScreenY(surface.area.y, camera),
-            static_cast<int>(surface.area.w),
-            static_cast<int>(surface.area.h)
-        };
-        SDL_RenderDrawRect(renderer, &outline);
-    }
-
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
 static Vec2 Reflect(const Vec2& v, const Vec2& n)
@@ -890,64 +850,6 @@ static bool CircleIntersectsCircle(const Circle& a, const Circle& b)
     return LengthSq(a.center - b.center) <= rr * rr;
 }
 
-static bool RectsOverlap(const RectF& a, const RectF& b, float padding = 0.0f)
-{
-    return a.x < b.x + b.w + padding &&
-        a.x + a.w + padding > b.x &&
-        a.y < b.y + b.h + padding &&
-        a.y + a.h + padding > b.y;
-}
-
-static bool CanPlaceBreakableWall(
-    const RectF& rect,
-    const std::vector<RectF>& obstacles,
-    const std::vector<BreakableWall>& walls)
-{
-    Vec2 center(rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f);
-
-    if (Distance(center, Vec2(420.0f, 420.0f)) < 520.0f)
-    {
-        return false;
-    }
-
-    if (rect.x < 140.0f || rect.y < 140.0f ||
-        rect.x + rect.w > WORLD_WIDTH - 140.0f ||
-        rect.y + rect.h > WORLD_HEIGHT - 140.0f)
-    {
-        return false;
-    }
-
-    for (const RectF& obstacle : obstacles)
-    {
-        if (RectsOverlap(rect, obstacle, 24.0f))
-        {
-            return false;
-        }
-    }
-
-    for (const BreakableWall& wall : walls)
-    {
-        if (wall.alive && RectsOverlap(rect, wall.rect, 32.0f))
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-static void TryAddBreakableWall(
-    std::vector<BreakableWall>& walls,
-    const std::vector<RectF>& obstacles,
-    const RectF& rect,
-    int hp)
-{
-    if (CanPlaceBreakableWall(rect, obstacles, walls))
-    {
-        walls.push_back({ rect, hp, hp, true });
-    }
-}
-
 static void DrawCircle(SDL_Renderer* renderer, int cx, int cy, int radius)
 {
     for (int x = -radius; x <= radius; ++x)
@@ -990,113 +892,6 @@ static void DrawWorldRect(SDL_Renderer* renderer, const RectF& r, const Camera& 
     };
 
     SDL_RenderFillRect(renderer, &rect);
-}
-
-
-static void DrawObjectHealthBar(
-    SDL_Renderer* renderer,
-    const Vec2& worldPos,
-    float objectHalfWidth,
-    float yOffset,
-    int hp,
-    int maxHp,
-    const Camera& camera)
-{
-    if (maxHp <= 0)
-    {
-        return;
-    }
-
-    float ratio = Clamp(static_cast<float>(hp) / static_cast<float>(maxHp), 0.0f, 1.0f);
-    int width = static_cast<int>(objectHalfWidth * 2.0f);
-
-    if (width < 36)
-    {
-        width = 36;
-    }
-
-    if (width > 96)
-    {
-        width = 96;
-    }
-
-    Vec2 screen = WorldToScreen(worldPos, camera);
-    SDL_Rect back{
-        static_cast<int>(screen.x - width * 0.5f),
-        static_cast<int>(screen.y - yOffset),
-        width,
-        7
-    };
-
-    SDL_SetRenderDrawColor(renderer, 25, 25, 30, 230);
-    SDL_RenderFillRect(renderer, &back);
-
-    SDL_Rect fill = back;
-    fill.x += 1;
-    fill.y += 1;
-    fill.w = static_cast<int>((width - 2) * ratio);
-    fill.h -= 2;
-
-    if (ratio > 0.65f)
-    {
-        SDL_SetRenderDrawColor(renderer, 80, 220, 110, 255);
-    }
-    else if (ratio > 0.30f)
-    {
-        SDL_SetRenderDrawColor(renderer, 235, 190, 70, 255);
-    }
-    else
-    {
-        SDL_SetRenderDrawColor(renderer, 235, 80, 75, 255);
-    }
-
-    SDL_RenderFillRect(renderer, &fill);
-    SDL_SetRenderDrawColor(renderer, 245, 245, 245, 200);
-    SDL_RenderDrawRect(renderer, &back);
-}
-
-static void DrawBreakableWall(SDL_Renderer* renderer, const BreakableWall& wall, const Camera& camera)
-{
-    SDL_SetRenderDrawColor(renderer, 142, 86, 48, 255);
-    DrawWorldRect(renderer, wall.rect, camera);
-
-    SDL_Rect outline{
-        ScreenX(wall.rect.x, camera),
-        ScreenY(wall.rect.y, camera),
-        static_cast<int>(wall.rect.w),
-        static_cast<int>(wall.rect.h)
-    };
-
-    SDL_SetRenderDrawColor(renderer, 88, 48, 28, 255);
-    SDL_RenderDrawRect(renderer, &outline);
-
-    int crackCount = 3;
-    float damageRatio = 1.0f - Clamp(static_cast<float>(wall.hp) / static_cast<float>(wall.maxHp), 0.0f, 1.0f);
-
-    if (damageRatio > 0.35f)
-    {
-        crackCount = 5;
-    }
-
-    if (damageRatio > 0.70f)
-    {
-        crackCount = 7;
-    }
-
-    SDL_SetRenderDrawColor(renderer, 65, 36, 24, 180);
-
-    for (int i = 0; i < crackCount; ++i)
-    {
-        float t = static_cast<float>(i + 1) / static_cast<float>(crackCount + 1);
-        int x0 = ScreenX(wall.rect.x + wall.rect.w * t, camera);
-        int y0 = ScreenY(wall.rect.y + 10.0f + static_cast<float>((i * 17) % 45), camera);
-        int x1 = x0 + ((i % 2 == 0) ? 18 : -18);
-        int y1 = y0 + 26;
-        SDL_RenderDrawLine(renderer, x0, y0, x1, y1);
-    }
-
-    Vec2 center(wall.rect.x + wall.rect.w * 0.5f, wall.rect.y + wall.rect.h * 0.5f);
-    DrawObjectHealthBar(renderer, center, wall.rect.w * 0.5f, wall.rect.h * 0.5f + 18.0f, wall.hp, wall.maxHp, camera);
 }
 
 static void ResolveCircleWorld(Vec2& pos, Vec2& vel, float radius, const std::vector<RectF>& obstacles)
@@ -1208,137 +1003,6 @@ static void BuildObstacles(std::vector<RectF>& obstacles)
     obstacles.push_back({ 2680.0f, 420.0f, 90.0f, 220.0f });
     obstacles.push_back({ 2920.0f, 1680.0f, 140.0f, 100.0f });
     obstacles.push_back({ 220.0f, 1880.0f, 300.0f, 90.0f });
-
-    // Wider map decoration/cover: fixed walls plus a few random-looking walls.
-    obstacles.push_back({ 760.0f, 1240.0f, 90.0f, 260.0f });
-    obstacles.push_back({ 1180.0f, 1860.0f, 440.0f, 80.0f });
-    obstacles.push_back({ 2020.0f, 1960.0f, 90.0f, 340.0f });
-    obstacles.push_back({ 2520.0f, 1880.0f, 500.0f, 80.0f });
-    obstacles.push_back({ 3180.0f, 1320.0f, 80.0f, 420.0f });
-    obstacles.push_back({ 3160.0f, 2140.0f, 260.0f, 80.0f });
-
-    for (int i = 0; i < 8; ++i)
-    {
-        float x = 520.0f + static_cast<float>(std::rand() % 2600);
-        float y = 520.0f + static_cast<float>(std::rand() % 1700);
-        int kind = std::rand() % 3;
-        RectF randomWall;
-
-        if (kind == 0)
-        {
-            randomWall = { x, y, 220.0f + static_cast<float>(std::rand() % 220), 70.0f };
-        }
-        else if (kind == 1)
-        {
-            randomWall = { x, y, 70.0f, 180.0f + static_cast<float>(std::rand() % 240) };
-        }
-        else
-        {
-            randomWall = { x, y, 120.0f, 120.0f };
-        }
-
-        Vec2 wallCenter(randomWall.x + randomWall.w * 0.5f, randomWall.y + randomWall.h * 0.5f);
-
-        if (Distance(wallCenter, Vec2(420.0f, 420.0f)) > 520.0f)
-        {
-            obstacles.push_back(randomWall);
-        }
-    }
-}
-
-
-static void SpawnBreakableWalls(std::vector<BreakableWall>& walls, const std::vector<RectF>& obstacles)
-{
-    walls.clear();
-
-    // Reduced count: fewer breakable walls, but still mixed sizes for demonstration.
-    TryAddBreakableWall(walls, obstacles, { 1320.0f, 520.0f, 160.0f, 80.0f }, 8);
-    TryAddBreakableWall(walls, obstacles, { 2360.0f, 980.0f, 90.0f, 220.0f }, 12);
-    TryAddBreakableWall(walls, obstacles, { 1140.0f, 1680.0f, 240.0f, 90.0f }, 14);
-    TryAddBreakableWall(walls, obstacles, { 1840.0f, 1220.0f, 360.0f, 70.0f }, 18);
-    TryAddBreakableWall(walls, obstacles, { 2740.0f, 760.0f, 70.0f, 300.0f }, 18);
-
-    const int randomTargetCount = 2;
-    int added = 0;
-    int attempts = 0;
-
-    while (added < randomTargetCount && attempts < 80)
-    {
-        attempts += 1;
-
-        float x = 680.0f + static_cast<float>(std::rand() % 2350);
-        float y = 620.0f + static_cast<float>(std::rand() % 1450);
-        RectF rect;
-
-        if (std::rand() % 2 == 0)
-        {
-            rect = { x, y, 220.0f + static_cast<float>(std::rand() % 180), 70.0f };
-        }
-        else
-        {
-            rect = { x, y, 70.0f, 180.0f + static_cast<float>(std::rand() % 160) };
-        }
-
-        int before = static_cast<int>(walls.size());
-        TryAddBreakableWall(walls, obstacles, rect, 16);
-
-        if (static_cast<int>(walls.size()) > before)
-        {
-            added += 1;
-        }
-    }
-}
-
-static void AddAliveBreakableWallsToObstacles(
-    std::vector<RectF>& activeObstacles,
-    const std::vector<BreakableWall>& breakableWalls)
-{
-    for (const BreakableWall& wall : breakableWalls)
-    {
-        if (wall.alive)
-        {
-            activeObstacles.push_back(wall.rect);
-        }
-    }
-}
-
-static std::vector<RectF> MakeActiveObstacles(
-    const std::vector<RectF>& obstacles,
-    const std::vector<BreakableWall>& breakableWalls)
-{
-    std::vector<RectF> activeObstacles = obstacles;
-    AddAliveBreakableWallsToObstacles(activeObstacles, breakableWalls);
-    return activeObstacles;
-}
-
-static int FindBreakableWallHit(
-    const Bullet& bullet,
-    std::vector<BreakableWall>& breakableWalls,
-    ContactInfo& bestHit)
-{
-    int bestIndex = -1;
-    float bestPen = -1.0f;
-
-    for (int i = 0; i < static_cast<int>(breakableWalls.size()); ++i)
-    {
-        BreakableWall& wall = breakableWalls[i];
-
-        if (!wall.alive)
-        {
-            continue;
-        }
-
-        ContactInfo hit = CircleVsRect(Circle{ bullet.pos, bullet.radius }, wall.rect);
-
-        if (hit.hit && hit.penetration > bestPen)
-        {
-            bestHit = hit;
-            bestPen = hit.penetration;
-            bestIndex = i;
-        }
-    }
-
-    return bestIndex;
 }
 
 static Enemy MakeEnemy(Vec2 pos, EnemyType type, int hp, float radius)
@@ -1352,32 +1016,9 @@ static Enemy MakeEnemy(Vec2 pos, EnemyType type, int hp, float radius)
     enemy.shootTimer = 1.0f;
     enemy.contactCooldown = 0.0f;
     enemy.alive = true;
-    enemy.alerted = false;
-    enemy.facing = Normalize(Vec2(420.0f, 420.0f) - pos);
-
-    if (LengthSq(enemy.facing) < 0.001f)
-    {
-        enemy.facing = Vec2(-1.0f, 0.0f);
-    }
-
-    enemy.detectionRange = 360.0f;
-    enemy.detectionCos = std::cos(38.0f * PI / 180.0f);
-
-    if (type == EnemyType::Gun)
-    {
-        enemy.detectionRange = 500.0f;
-        enemy.detectionCos = std::cos(42.0f * PI / 180.0f);
-    }
-    else if (type == EnemyType::Bat)
-    {
-        enemy.detectionRange = 410.0f;
-        enemy.detectionCos = std::cos(40.0f * PI / 180.0f);
-    }
-
     enemy.type = type;
     return enemy;
 }
-
 
 static void SpawnEnemies(std::vector<Enemy>& enemies)
 {
@@ -1557,98 +1198,10 @@ static bool HasLineOfSight(const Vec2& from, const Vec2& to, const std::vector<R
     return true;
 }
 
-
-static bool CanEnemyDetectPlayer(const Enemy& enemy, const Player& player, const std::vector<RectF>& obstacles)
-{
-    Vec2 toPlayer = player.pos - enemy.pos;
-    float distSq = LengthSq(toPlayer);
-
-    if (distSq > enemy.detectionRange * enemy.detectionRange)
-    {
-        return false;
-    }
-
-    Vec2 dir = Normalize(toPlayer);
-
-    if (Dot(Normalize(enemy.facing), dir) < enemy.detectionCos)
-    {
-        return false;
-    }
-
-    return HasLineOfSight(enemy.pos, player.pos, obstacles);
-}
-
-static void DrawEnemyDetectionArc(SDL_Renderer* renderer, const Enemy& enemy, const Camera& camera)
-{
-    if (enemy.alerted)
-    {
-        return;
-    }
-
-    Vec2 facing = Normalize(enemy.facing);
-
-    if (LengthSq(facing) < 0.001f)
-    {
-        facing = Vec2(-1.0f, 0.0f);
-    }
-
-    float halfAngle = std::acos(enemy.detectionCos);
-    float baseAngle = std::atan2(facing.y, facing.x);
-    const int segments = 16;
-
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer, 255, 220, 80, 55);
-
-    Vec2 center = WorldToScreen(enemy.pos, camera);
-    Vec2 previous(
-        enemy.pos.x + std::cos(baseAngle - halfAngle) * enemy.detectionRange,
-        enemy.pos.y + std::sin(baseAngle - halfAngle) * enemy.detectionRange
-    );
-
-    SDL_RenderDrawLine(
-        renderer,
-        static_cast<int>(center.x),
-        static_cast<int>(center.y),
-        ScreenX(previous.x, camera),
-        ScreenY(previous.y, camera)
-    );
-
-    for (int i = 1; i <= segments; ++i)
-    {
-        float t = static_cast<float>(i) / static_cast<float>(segments);
-        float angle = baseAngle - halfAngle + halfAngle * 2.0f * t;
-        Vec2 current(
-            enemy.pos.x + std::cos(angle) * enemy.detectionRange,
-            enemy.pos.y + std::sin(angle) * enemy.detectionRange
-        );
-
-        SDL_RenderDrawLine(
-            renderer,
-            ScreenX(previous.x, camera),
-            ScreenY(previous.y, camera),
-            ScreenX(current.x, camera),
-            ScreenY(current.y, camera)
-        );
-
-        previous = current;
-    }
-
-    SDL_RenderDrawLine(
-        renderer,
-        static_cast<int>(center.x),
-        static_cast<int>(center.y),
-        ScreenX(previous.x, camera),
-        ScreenY(previous.y, camera)
-    );
-
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-}
-
 static void DrawPlayer(
     SDL_Renderer* renderer,
     const Player& player,
     const Camera& camera,
-    const Vec2& aimWorld,
     const GameTextures& textures)
 {
     if (textures.playerBoo.texture)
@@ -1662,33 +1215,23 @@ static void DrawPlayer(
         DrawCircle(renderer, static_cast<int>(screen.x), static_cast<int>(screen.y), static_cast<int>(player.radius));
     }
 
-    Vec2 aimDir = aimWorld - player.pos;
+    const TextureAsset* weaponTexture = GetWeaponTexture(textures, player.weapon);
 
-    if (Length(aimDir) > 0.001f)
+    if (weaponTexture && weaponTexture->texture)
     {
-        aimDir = Normalize(aimDir);
-        float aimAngle = std::atan2(aimDir.y, aimDir.x);
-        const TextureAsset* weaponTexture = GetWeaponTexture(textures, player.weapon);
+        // BOO always faces right; keep the held weapon horizontal and fixed while moving.
+        const Vec2 handOffset{ 11.0f, 8.0f };
+        Vec2 handPos = player.pos + handOffset;
+        float displaySize = GetWeaponDisplaySize(player.weapon);
 
-        if (weaponTexture && weaponTexture->texture)
-        {
-            // BOO faces right; front-pocket hand anchor on the right torso.
-            const Vec2 handOffset{ 11.0f, 8.0f };
-            Vec2 handPos = player.pos + handOffset;
-            float weaponAngle = aimAngle + PI;
-            float displaySize = GetWeaponDisplaySize(player.weapon);
-            Vec2 gripLocal = GetWeaponGripLocalOffset(*weaponTexture, displaySize);
-            Vec2 weaponPos = handPos - RotateVec2(gripLocal, weaponAngle);
-
-            DrawTextureRotated(
-                renderer,
-                *weaponTexture,
-                weaponPos,
-                camera,
-                displaySize,
-                weaponAngle
-            );
-        }
+        DrawPlayerHeldWeapon(
+            renderer,
+            *weaponTexture,
+            player.weapon,
+            handPos,
+            camera,
+            displaySize
+        );
     }
 }
 
@@ -2195,38 +1738,67 @@ static void DrawMainMenu(
     DrawCachedText(renderer, *hint, WINDOW_WIDTH / 2, WINDOW_HEIGHT - 48, true);
 }
 
-static const wchar_t kWeaponNamePistol[] = { 0xAD8C, 0xCD09, 0 };
-static const wchar_t kWeaponNameMachineGun[] = { 0xAE30, 0xAD00, 0xB2E8, 0xCD09, 0 };
-static const wchar_t kWeaponNameShotgun[] = { 0xC0F7, 0xAC74, 0 };
-
-static const wchar_t* GetChestItemName(ItemType item)
+static const std::wstring& GetWeaponNameWide(WeaponType weapon)
 {
-    if (item == ItemType::MachineGun)
-    {
-        return kWeaponNameMachineGun;
-    }
+    static const std::wstring pistol = Utf8ToWide("\xEA\xB6\x8C\xEC\xB4\x9D");
+    static const std::wstring machineGun = Utf8ToWide("\xEA\xB8\xB0\xEA\xB4\x80\xEB\x8B\xA8\xEC\xB4\x9D");
+    static const std::wstring shotgun = Utf8ToWide("\xEC\x83\xB7\xEA\xB1\xB4");
 
-    if (item == ItemType::Shotgun)
-    {
-        return kWeaponNameShotgun;
-    }
-
-    return kWeaponNamePistol;
-}
-
-static const wchar_t* GetWeaponName(WeaponType weapon)
-{
     if (weapon == WeaponType::MachineGun)
     {
-        return kWeaponNameMachineGun;
+        return machineGun;
     }
 
     if (weapon == WeaponType::Shotgun)
     {
-        return kWeaponNameShotgun;
+        return shotgun;
     }
 
-    return kWeaponNamePistol;
+    return pistol;
+}
+
+static const std::wstring& GetChestItemNameWide(ItemType item)
+{
+    if (item == ItemType::MachineGun)
+    {
+        return GetWeaponNameWide(WeaponType::MachineGun);
+    }
+
+    if (item == ItemType::Shotgun)
+    {
+        return GetWeaponNameWide(WeaponType::Shotgun);
+    }
+
+    return GetWeaponNameWide(WeaponType::Pistol);
+}
+
+static void DrawChestWeaponIcon(
+    SDL_Renderer* renderer,
+    const TextureAsset& asset,
+    const SDL_Rect& iconArea,
+    int maxWidth,
+    int maxHeight)
+{
+    if (!asset.texture || asset.width <= 0 || asset.height <= 0)
+    {
+        return;
+    }
+
+    float scaleW = static_cast<float>(maxWidth) / static_cast<float>(asset.width);
+    float scaleH = static_cast<float>(maxHeight) / static_cast<float>(asset.height);
+    float scale = scaleW < scaleH ? scaleW : scaleH;
+
+    int drawW = static_cast<int>(asset.width * scale);
+    int drawH = static_cast<int>(asset.height * scale);
+
+    SDL_Rect dst{
+        iconArea.x + (iconArea.w - drawW) / 2,
+        iconArea.y + (iconArea.h - drawH) / 2,
+        drawW,
+        drawH
+    };
+
+    SDL_RenderCopy(renderer, asset.texture, nullptr, &dst);
 }
 
 static void DrawChestSlotPanel(
@@ -2267,29 +1839,23 @@ static void DrawChestSlotPanel(
 
     if (showChestItem)
     {
-        if (chestItem == ItemType::MachineGun && textures.weaponMachineGun.texture)
+        if (chestItem == ItemType::MachineGun)
         {
-            SDL_Rect dst{ iconArea.x + 8, iconArea.y + 46, 124, 48 };
-            SDL_RenderCopy(renderer, textures.weaponMachineGun.texture, nullptr, &dst);
+            DrawChestWeaponIcon(renderer, textures.weaponMachineGun, iconArea, 120, 40);
         }
-        else if (chestItem == ItemType::Shotgun && textures.weaponShotgun.texture)
+        else if (chestItem == ItemType::Shotgun)
         {
-            SDL_Rect dst{ iconArea.x + 4, iconArea.y + 48, 132, 44 };
-            SDL_RenderCopy(renderer, textures.weaponShotgun.texture, nullptr, &dst);
+            DrawChestWeaponIcon(renderer, textures.weaponShotgun, iconArea, 120, 40);
         }
         else
         {
-            if (textures.weaponPistol.texture)
-            {
-                SDL_Rect dst{ iconArea.x + 24, iconArea.y + 54, 92, 32 };
-                SDL_RenderCopy(renderer, textures.weaponPistol.texture, nullptr, &dst);
-            }
+            DrawChestWeaponIcon(renderer, textures.weaponPistol, iconArea, 120, 40);
         }
 
         TextEntry* itemText = FindOrCreateText(
             renderer,
             textCache,
-            GetChestItemName(chestItem),
+            GetChestItemNameWide(chestItem).c_str(),
             20,
             SDL_Color{ 180, 188, 204, 255 },
             FW_NORMAL
@@ -2300,16 +1866,15 @@ static void DrawChestSlotPanel(
     {
         const TextureAsset* weaponTexture = GetWeaponTexture(textures, currentWeapon);
 
-        if (weaponTexture && weaponTexture->texture)
+        if (weaponTexture)
         {
-            SDL_Rect dst{ iconArea.x + 10, iconArea.y + 48, 120, 44 };
-            SDL_RenderCopy(renderer, weaponTexture->texture, nullptr, &dst);
+            DrawChestWeaponIcon(renderer, *weaponTexture, iconArea, 120, 40);
         }
 
         TextEntry* itemText = FindOrCreateText(
             renderer,
             textCache,
-            GetWeaponName(currentWeapon),
+            GetWeaponNameWide(currentWeapon).c_str(),
             20,
             SDL_Color{ 180, 188, 204, 255 },
             FW_NORMAL
@@ -2369,10 +1934,10 @@ static void DrawChestUi(
         textCache,
         textures,
         UiRect{ 270, 210, 300, 220 },
-        L"\uD604\uC7AC \uBB34\uAE30",
+        L"\ubcf4\ubb3c\uc0c1\uc790",
         chest.item,
         player.weapon,
-        false
+        !chest.itemTaken
     );
 
     DrawChestSlotPanel(
@@ -2380,10 +1945,10 @@ static void DrawChestUi(
         textCache,
         textures,
         UiRect{ 710, 210, 300, 220 },
-        L"\uBCF4\uBB3C\uC0C1\uC790 \uC544\uC774\uD15C",
+        L"\ud604\uc7ac \ubb34\uae30",
         chest.item,
         player.weapon,
-        !chest.itemTaken
+        false
     );
 
     if (!ui.confirmTake)
@@ -2494,20 +2059,18 @@ static void DrawInfoPanel(
 static void DrawHowToPlayScreen(SDL_Renderer* renderer, std::vector<TextEntry>& textCache)
 {
     const wchar_t* lines[] = {
-        L"BOO\uB97C \uC870\uC791\uD574 \uB113\uC740 \uB9F5\uC744 \uD0D0\uD5D8\uD558\uACE0 \uC801\uC744 \uCC98\uCE58\uD558\uC138\uC694.",
+        L"BOO\ub97c \uc870\uc791\ud574 \ub113\uc740 \ub9f5 \uc548\uc758 \uc801\uc744 \ucc98\uce58\ud558\uace0 \ubcf4\ubb3c\uc744 \ubaa8\uc73c\uc138\uc694.",
         L"",
-        L"\u2022 \uC5BC\uC74C \uC7A5\uD310: \uB9C8\uCC30\uC774 \uB0AE\uC544 \uBA48\uCD98 \uB4A4\uC5D0\uB3C4 \uBBF8\uB044\uB7EC\uC9D1\uB2C8\uB2E4.",
-        L"\u2022 \uC9C4\uD759 \uC7A5\uD310: \uC774\uB3D9 \uC18D\uB3C4\uAC00 \uB290\uB824\uC9C0\uACE0 \uB354 \uBE68\uB9AC \uAC10\uC18D\uD569\uB2C8\uB2E4.",
-        L"\u2022 \uB098\uBB34 \uBCBD\uC740 \uCCB4\uB825\uC744 \uAC00\uC9C4 \uD30C\uAD34 \uAC00\uB2A5\uD55C \uBCBD\uC785\uB2C8\uB2E4. \uCD1D\uC54C\uB85C \uBD80\uC220 \uC218 \uC788\uC2B5\uB2C8\uB2E4.",
-        L"\u2022 \uC801\uACFC \uD30C\uAD34 \uAC00\uB2A5\uD55C \uBCBD \uC704\uC5D0\uB294 \uAC01\uAC01 \uCCB4\uB825\uBC14\uAC00 \uD45C\uC2DC\uB429\uB2C8\uB2E4.",
-        L"\u2022 \uC801\uC740 \uB178\uB780 \uBD80\uCC44\uAF34 \uC778\uC2DD \uBC94\uC704 \uC548\uC5D0 \uD50C\uB808\uC774\uC5B4\uAC00 \uB4E4\uC5B4\uC624\uBA74 \uCD94\uC801\uD569\uB2C8\uB2E4.",
-        L"\u2022 \uBA3C\uC800 \uACF5\uACA9\uBC1B\uC740 \uC801\uC740 \uC778\uC2DD \uBC94\uC704 \uBC16\uC774\uC5B4\uB3C4 \uD50C\uB808\uC774\uC5B4\uB97C \uCD94\uC801\uD569\uB2C8\uB2E4.",
-        L"\u2022 \uBCF4\uBB3C\uC0C1\uC790\uC5D0\uC11C\uB294 \uD604\uC7AC \uBB34\uAE30\uC640 \uC0C1\uC790 \uC544\uC774\uD15C\uC744 \uBE44\uAD50\uD55C \uB4A4 \uAD50\uCCB4\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."
+        L"\x2022 \ubcf4\ubb3c\uc0c1\uc790\uc5d0\uc11c \uc0c8 \ubb34\uae30\uc640 \ud68c\ubcf5 \uc544\uc774\ud15c\uc744 \uc5bb\uc744 \uc218 \uc788\uc2b5\ub2c8\ub2e4.",
+        L"\x2022 \ud544\ub4dc \uc544\uc774\ud15c\uc744 \ud68d\ub4dd\ud558\uba74 \ubc1c\uc0ac\uc18d\ub3c4 / \ubc18\uc0ac \ubc84\ud504\uac00 \uc801\uc6a9\ub429\ub2c8\ub2e4.",
+        L"\x2022 \uc801\uc744 \ucc98\uce58\ud558\uba74 \uc804\ub9ac\ud488\uc774 \ub4dc\ub86d\ub418\uace0, \uc0ac\ub9dd \uc2dc \uc2a4\ud3f0 \uc9c0\uc810\uc5d0\uc11c \ub2e4\uc2dc \uc2dc\uc791\ud569\ub2c8\ub2e4.",
+        L"",
+        L"\x2022 \ub2a5\ub300(6HP) / \ub2e4\uac00\uc624\ub294\uc801(3HP) / \uc57c\uad6c\ubc29\ub9dd\uc774\uc801(5HP) : \uadfc\uc811 \uacf5\uaca9",
+        L"\x2022 \ucd1d\ub4e0\uc801(4HP) : \uc6d0\uac70\ub9ac \uc0ac\uaca9"
     };
 
-    DrawInfoPanel(renderer, textCache, L"\uAC8C\uC784 \uBC29\uBC95", lines, 9);
+    DrawInfoPanel(renderer, textCache, L"\uac8c\uc784 \ubc29\ubc95", lines, 8);
 }
-
 
 static void DrawControlsScreen(SDL_Renderer* renderer, std::vector<TextEntry>& textCache)
 {
@@ -2530,8 +2093,6 @@ static void ResetGameplay(
     std::vector<Enemy>& enemies,
     std::vector<Chest>& chests,
     std::vector<BuffPickup>& buffs,
-    std::vector<BreakableWall>& breakableWalls,
-    const std::vector<RectF>& obstacles,
     ChestUiState& chestUi)
 {
     player.Reset();
@@ -2543,7 +2104,6 @@ static void ResetGameplay(
     SpawnEnemies(enemies);
     SpawnChests(chests);
     SpawnBuffPickups(buffs);
-    SpawnBreakableWalls(breakableWalls, obstacles);
 }
 
 static bool HandleMenuInput(
@@ -2705,16 +2265,12 @@ int main(int argc, char* argv[])
     Player player;
 
     std::vector<RectF> obstacles;
-    std::vector<SurfaceZone> surfaces;
-    std::vector<BreakableWall> breakableWalls;
     std::vector<Enemy> enemies;
     std::vector<Bullet> bullets;
     std::vector<Chest> chests;
     std::vector<BuffPickup> buffs;
 
     BuildObstacles(obstacles);
-    BuildSurfaceZones(surfaces);
-    SpawnBreakableWalls(breakableWalls, obstacles);
     SpawnEnemies(enemies);
     SpawnChests(chests);
     SpawnBuffPickups(buffs);
@@ -2775,7 +2331,7 @@ int main(int argc, char* argv[])
 
                 if (HandleMenuInput(menu, event, mouseX, mouseY))
                 {
-                    ResetGameplay(player, bullets, enemies, chests, buffs, breakableWalls, obstacles, chestUi);
+                    ResetGameplay(player, bullets, enemies, chests, buffs, chestUi);
                 }
 
                 continue;
@@ -2806,7 +2362,7 @@ int main(int argc, char* argv[])
 
                 if (event.key.keysym.sym == SDLK_r)
                 {
-                    ResetGameplay(player, bullets, enemies, chests, buffs, breakableWalls, obstacles, chestUi);
+                    ResetGameplay(player, bullets, enemies, chests, buffs, chestUi);
                 }
 
                 if (event.key.keysym.sym == SDLK_e)
@@ -2910,7 +2466,6 @@ int main(int argc, char* argv[])
         while (accumulator >= FIXED_DT)
         {
             const Uint8* keys = SDL_GetKeyboardState(nullptr);
-            std::vector<RectF> activeObstacles = MakeActiveObstacles(obstacles, breakableWalls);
 
             if (!chestUi.open)
             {
@@ -2941,33 +2496,9 @@ int main(int argc, char* argv[])
                     input = Normalize(input);
                 }
 
-                SurfaceZone currentSurface = GetSurfaceAt(player.pos, surfaces);
-                Vec2 targetVel = input * (player.speed * currentSurface.speedMultiplier);
+                player.vel = input * player.speed;
 
-                if (Length(input) > 0.001f)
-                {
-                    float controlFactor = Clamp(currentSurface.control * FIXED_DT, 0.0f, 1.0f);
-                    player.vel += (targetVel - player.vel) * controlFactor;
-                }
-                else
-                {
-                    float damping = Clamp(1.0f - currentSurface.friction * FIXED_DT, 0.0f, 1.0f);
-                    player.vel = player.vel * damping;
-
-                    if (LengthSq(player.vel) < 1.0f)
-                    {
-                        player.vel = Vec2(0.0f, 0.0f);
-                    }
-                }
-
-                float maxMoveSpeed = player.speed * currentSurface.speedMultiplier * 1.25f;
-
-                if (LengthSq(player.vel) > maxMoveSpeed * maxMoveSpeed)
-                {
-                    player.vel = Normalize(player.vel) * maxMoveSpeed;
-                }
-
-                MoveCircleSafely(player.pos, player.vel, player.radius, activeObstacles, FIXED_DT);
+                MoveCircleSafely(player.pos, player.vel, player.radius, obstacles, FIXED_DT);
 
                 if ((mouseState & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0 && player.shootTimer <= 0.0f)
                 {
@@ -3064,27 +2595,6 @@ int main(int argc, char* argv[])
                         enemy.contactCooldown -= FIXED_DT;
                     }
 
-                    if (!enemy.alerted && CanEnemyDetectPlayer(enemy, player, activeObstacles))
-                    {
-                        enemy.alerted = true;
-                    }
-
-                    if (!enemy.alerted && dist <= enemy.radius + player.radius + 8.0f)
-                    {
-                        enemy.alerted = true;
-                    }
-
-                    if (!enemy.alerted)
-                    {
-                        enemy.vel = Vec2(0.0f, 0.0f);
-                        continue;
-                    }
-
-                    if (LengthSq(toPlayer) > 0.001f)
-                    {
-                        enemy.facing = Normalize(toPlayer);
-                    }
-
                     if (enemy.type == EnemyType::Gun)
                     {
                         if (dist > 220.0f)
@@ -3097,13 +2607,13 @@ int main(int argc, char* argv[])
                         }
 
                         enemy.vel = desiredVel;
-                        MoveCircleSafely(enemy.pos, enemy.vel, enemy.radius, activeObstacles, FIXED_DT);
+                        MoveCircleSafely(enemy.pos, enemy.vel, enemy.radius, obstacles, FIXED_DT);
 
                         enemy.shootTimer -= FIXED_DT;
 
                         if (enemy.shootTimer <= 0.0f && dist < 720.0f)
                         {
-                            if (HasLineOfSight(enemy.pos, player.pos, activeObstacles))
+                            if (HasLineOfSight(enemy.pos, player.pos, obstacles))
                             {
                                 AddBullet(
                                     bullets,
@@ -3146,7 +2656,7 @@ int main(int argc, char* argv[])
                         }
 
                         enemy.vel = desiredVel;
-                        MoveCircleSafely(enemy.pos, enemy.vel, enemy.radius, activeObstacles, FIXED_DT);
+                        MoveCircleSafely(enemy.pos, enemy.vel, enemy.radius, obstacles, FIXED_DT);
 
                         if (dist <= enemy.radius + player.radius + 8.0f && enemy.contactCooldown <= 0.0f)
                         {
@@ -3174,7 +2684,6 @@ int main(int argc, char* argv[])
                                 SpawnEnemies(enemies);
                                 SpawnChests(chests);
                                 SpawnBuffPickups(buffs);
-                                SpawnBreakableWalls(breakableWalls, obstacles);
                             }
                         }
                     }
@@ -3192,28 +2701,6 @@ int main(int argc, char* argv[])
 
                     if (bullet.life <= 0.0f)
                     {
-                        bullet.alive = false;
-                        continue;
-                    }
-
-                    ContactInfo breakableHit;
-                    int breakableIndex = FindBreakableWallHit(bullet, breakableWalls, breakableHit);
-
-                    if (breakableIndex >= 0)
-                    {
-                        BreakableWall& wall = breakableWalls[breakableIndex];
-
-                        if (bullet.fromPlayer)
-                        {
-                            wall.hp -= bullet.damage;
-
-                            if (wall.hp <= 0)
-                            {
-                                wall.hp = 0;
-                                wall.alive = false;
-                            }
-                        }
-
                         bullet.alive = false;
                         continue;
                     }
@@ -3289,8 +2776,6 @@ int main(int argc, char* argv[])
                             {
                                 bullet.alive = false;
                                 enemy.hp -= bullet.damage;
-                                enemy.alerted = true;
-                                enemy.facing = Normalize(player.pos - enemy.pos);
 
                                 if (enemy.hp <= 0)
                                 {
@@ -3320,7 +2805,6 @@ int main(int argc, char* argv[])
                                 SpawnEnemies(enemies);
                                 SpawnChests(chests);
                                 SpawnBuffPickups(buffs);
-                                SpawnBreakableWalls(breakableWalls, obstacles);
                                 break;
                             }
                         }
@@ -3347,21 +2831,12 @@ int main(int argc, char* argv[])
         SDL_RenderClear(renderer);
 
         DrawWorldFloor(renderer, camera);
-        DrawSurfaceZones(renderer, surfaces, camera);
 
         SDL_SetRenderDrawColor(renderer, 70, 75, 88, 210);
 
         for (const RectF& r : obstacles)
         {
             DrawWorldRect(renderer, r, camera);
-        }
-
-        for (const BreakableWall& wall : breakableWalls)
-        {
-            if (wall.alive)
-            {
-                DrawBreakableWall(renderer, wall, camera);
-            }
         }
 
         for (const Chest& chest : chests)
@@ -3381,9 +2856,7 @@ int main(int argc, char* argv[])
         {
             if (enemy.alive)
             {
-                DrawEnemyDetectionArc(renderer, enemy, camera);
                 DrawEnemy(renderer, enemy, camera, textures);
-                DrawObjectHealthBar(renderer, enemy.pos, enemy.radius + 14.0f, enemy.radius + 28.0f, enemy.hp, enemy.maxHp, camera);
             }
         }
 
@@ -3409,7 +2882,7 @@ int main(int argc, char* argv[])
             DrawCircle(renderer, static_cast<int>(screen.x), static_cast<int>(screen.y), static_cast<int>(bullet.radius));
         }
 
-        DrawPlayer(renderer, player, camera, mouseWorld, textures);
+        DrawPlayer(renderer, player, camera, textures);
         DrawHealthBar(renderer, player);
         DrawStatusUI(renderer, player);
         DrawChestUi(renderer, textCache, chestUi, chests, player, textures);

@@ -64,13 +64,6 @@ inline Vec2& operator-=(Vec2& a, const Vec2& b)
     return a;
 }
 
-inline Vec2& operator*=(Vec2& a, float s)
-{
-    a.x *= s;
-    a.y *= s;
-    return a;
-}
-
 inline float Dot(const Vec2& a, const Vec2& b)
 {
     return a.x * b.x + a.y * b.y;
@@ -103,11 +96,6 @@ inline float Distance(const Vec2& a, const Vec2& b)
     return Length(a - b);
 }
 
-inline float DistanceSq(const Vec2& a, const Vec2& b)
-{
-    return LengthSq(a - b);
-}
-
 inline float Clamp(float value, float minValue, float maxValue)
 {
     if (value < minValue)
@@ -117,7 +105,7 @@ inline float Clamp(float value, float minValue, float maxValue)
 
     if (value > maxValue)
     {
-        return value = maxValue;
+        return maxValue;
     }
 
     return value;
